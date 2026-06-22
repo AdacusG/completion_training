@@ -4,7 +4,7 @@ import pickle
 import numpy as np
 
 def main():
-    input_file_path = "../input.txt"
+    input_file_path = "../inputadd.txt"
     if not os.path.exists(input_file_path):
         print(f"Input file '{input_file_path}' not found. Please run 'gen_comp_data.py' first.")
         return
@@ -15,6 +15,7 @@ def main():
     print("Total lines in dataset:", len(data))
     
     # Split the data list clean at 90%
+    # Can be done better with dataloader
     num_train_lines = int(len(data) * 0.9)
     train_lines = data[:num_train_lines]
     val_lines = data[num_train_lines:]
@@ -26,6 +27,7 @@ def main():
     
     # Generate vocab using the full text pool
     chars = sorted(list(set(full_data_str)))
+    chars.append('_')
     vocab_size = len(chars)
     print("Vocab size:", vocab_size)
     

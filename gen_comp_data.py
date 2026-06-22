@@ -49,10 +49,10 @@ def main():
             a = random.choice(all_possible_inputs)
             b = mapping_dict[a]  # 1-to-1 deterministic answer
             
-            a_padded = "_" * (n - len(a)) + a
-            b_padded = b + "_" * (n - len(b))
+            # a_padded = "_" * (n - len(a)) + a
+            # b_padded = b + "_" * (n - len(b))
             
-            f.write(f"{a_padded}={b_padded}\n")
+            f.write(f"{a}={b}\n")
 
     print(f"Successfully generated {num_lines} lines in input.txt")
 

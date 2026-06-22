@@ -13,7 +13,7 @@ batch_size = 32          # Parallel batching capacity
 embedding_dim = 128      # Size of your token vectors
 n_heads = 4              # Attention heads
 n_layers = 4             # Transformer layers
-epochs = 100              # Number of full passes through the data
+epochs = 250              # Number of full passes through the data
 lr = 1e-3
 out_dir = 'out_1char'
 
@@ -54,7 +54,7 @@ class SequenceDataset(Dataset):
             self.sequences.append(torch.tensor(seq))
             start_idx = end_idx + 1
             
-        # Determine your sequence length automatically from the data geometry (2n + 1)
+        # Determine your sequence length automatically from the data geometry (2n + 2)
         self.max_len = max(len(s) for s in self.sequences)
 
     def __len__(self):
@@ -63,22 +63,40 @@ class SequenceDataset(Dataset):
     def __getitem__(self, idx):
         seq = self.sequences[idx]
         
-        # X is the raw sequence
-        x = seq.clone()
+        # X is the raw sequence except the last token (which is the \n)
+        x = seq[:-1].clone()
         
         # Y is shifted by 1 step forward (Causal language modeling targets)
         # Sequence: [_, a, =, b, \n] -> Targets: [a, =, b, \n]
         y = torch.full_like(x, -100) # Initialize targets to -100 (ignore index)
-        shifted_targets = seq[1:]
+        shifted_targets = seq[1:].clone()
         
         # Find where the '=' delimiter token lives in this specific line
-        eq_positions = (seq == EQUAL_ID).nonzero(as_tuple=True)[0]
+        # Find where the '=' delimiter token lives in this specific line
+        eq_positions = (x == EQUAL_ID).nonzero(as_tuple=True)[0]
         if len(eq_positions) > 0:
             eq_pos = eq_positions[0].item()
-            # CRITICAL MASKING: Only calculate loss on the output tokens AFTER the '='
-            y[eq_pos : len(seq)-1] = shifted_targets[eq_pos:]
+            
+            # FIX: shifted_targets is already shifted by 1 relative to x.
+            # The character following x[eq_pos] is learned from shifted_targets[eq_pos].
+            y[eq_pos:] = shifted_targets[eq_pos:]
         else:
-            y[:len(seq)-1] = shifted_targets
+            raise ValueError(f"Line {idx} is missing the '=' delimiter!")
+            
+        # --- ADDING THE PADDING LOGIC HERE ---
+        # The maximum possible length for our truncated tensors is self.max_len - 1
+        target_len = self.max_len - 1
+        
+        if len(x) < target_len:
+            padding_needed = target_len - len(x)
+            
+            # Pad X with PAD_ID (trailing tokens)
+            padding_x = torch.full((padding_needed,), PAD_ID, dtype=torch.long)
+            x = torch.cat([x, padding_x])
+            
+            # Pad Y with -100 so the loss function completely ignores the padded zone
+            padding_y = torch.full((padding_needed,), -100, dtype=torch.long)
+            y = torch.cat([y, padding_y])
             
         return x, y
 
@@ -95,18 +113,19 @@ val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 print(f"Dataset Loaded! Sequence Vector Width: {seq_len} tokens.")
 print(f"Parallel Batch Layout Matrix: ({batch_size}, {seq_len})")
 
-# --- 4. Pure PyTorch Transformer Decoder Architecture ---
+# --- 4. Pure PyTorch Transformer Encoder Architecture ---
 class PureCompletionTransformer(nn.Module):
     def __init__(self, vocab_size, d_model, nhead, num_layers):
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, d_model)
         self.position_embedding = nn.Embedding(seq_len, d_model)
         
-        decoder_layer = nn.TransformerDecoderLayer(
+        # Use EncoderLayer for a GPT-style decoder-only behavior
+        encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model, nhead=nhead, dim_feedforward=d_model*4, 
             dropout=0.0, batch_first=True, norm_first=True
         )
-        self.transformer = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.ln_f = nn.LayerNorm(d_model)
         self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
 
@@ -120,8 +139,9 @@ class PureCompletionTransformer(nn.Module):
         # Generate standard causal mask to prevent looking ahead into the answer
         mask = nn.Transformer.generate_square_subsequent_mask(t, device=idx.device)
         
-        # Run standard attention loop
-        x = self.transformer(x, memory=x, tgt_mask=mask, memory_mask=mask)
+        # Run standard self-attention using the causal mask
+        x = self.transformer(x, mask=mask, is_causal=True)
+        
         x = self.ln_f(x)
         logits = self.lm_head(x)
         return logits
