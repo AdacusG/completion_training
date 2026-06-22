@@ -2,11 +2,12 @@
 import os
 import pickle
 import numpy as np
+import sys
 
 def main():
-    input_file_path = "../inputadd.txt"
+    input_file_path = sys.argv[1] if len(sys.argv) > 1 else "input.txt"
     if not os.path.exists(input_file_path):
-        print(f"Input file '{input_file_path}' not found. Please run 'gen_comp_data.py' first.")
+        print(f"Input file '{input_file_path}' not found. Make sure path is correct.")
         return
     
     with open(input_file_path, "r", encoding="utf-8") as f:
@@ -27,6 +28,7 @@ def main():
     
     # Generate vocab using the full text pool
     chars = sorted(list(set(full_data_str)))
+    # Add the padding character '_' to the vocabulary for use in train_completions.py
     chars.append('_')
     vocab_size = len(chars)
     print("Vocab size:", vocab_size)
