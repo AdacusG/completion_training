@@ -77,13 +77,11 @@ class SequenceDataset(Dataset):
         if len(eq_positions) > 0:
             eq_pos = eq_positions[0].item()
             
-            # FIX: shifted_targets is already shifted by 1 relative to x.
             # The character following x[eq_pos] is learned from shifted_targets[eq_pos].
             y[eq_pos:] = shifted_targets[eq_pos:]
         else:
             raise ValueError(f"Line {idx} is missing the '=' delimiter!")
             
-        # --- ADDING THE PADDING LOGIC HERE ---
         # The maximum possible length for our truncated tensors is self.max_len - 1
         target_len = self.max_len - 1
         

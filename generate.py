@@ -102,7 +102,7 @@ def complete_sequence(prompt_str, max_new_tokens=5):
         return "".join(completed_chars)
 
 # --- 6. Accuracy Evaluation Loop ---
-eval_file_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(data_dir, 'val.txt')
+eval_file_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(data_dir, 'input.txt')
 
 if not os.path.exists(eval_file_path):
     raise FileNotFoundError(f"Could not find file to parse at: {eval_file_path}")
@@ -135,7 +135,7 @@ with open(eval_file_path, 'r', encoding='utf-8') as f:
         
         # Determine dynamic length required to generate the output string length safely
         prediction = complete_sequence(prompt, max_new_tokens=len(ground_truth) + 1)
-        
+
         if prediction == ground_truth:
             correct_predictions += 1
         else:
