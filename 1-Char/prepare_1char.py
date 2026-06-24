@@ -2,10 +2,20 @@
 import os
 import pickle
 import numpy as np
-import sys
+import argparse
 
 def main():
-    input_file_path = sys.argv[1] if len(sys.argv) > 1 else "input.txt"
+    # Set up argparse to handle the input file path
+    parser = argparse.ArgumentParser(description="Prepare text dataset for training.")
+    parser.add_argument(
+        "input_file_path", 
+        nargs="?", 
+        default="input.txt", 
+        help="Path to the input text file (default: input.txt)"
+    )
+    args = parser.parse_args()
+
+    input_file_path = args.input_file_path
     if not os.path.exists(input_file_path):
         print(f"Input file '{input_file_path}' not found. Make sure path is correct.")
         return

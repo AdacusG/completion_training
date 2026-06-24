@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import random
 import string
-import sys
+import argparse
 
 def generate_all_unique_strings(n, charset):
     """Generates every possible unique string combination up to length n."""
@@ -19,9 +19,32 @@ def generate_all_unique_strings(n, charset):
     return pool
 
 def main():
-    n = int(sys.argv[1])
-    raw_charset = sys.argv[2]
-    num_lines = int(sys.argv[3])
+    parser = argparse.ArgumentParser(
+        description="Generate a deterministic 1-to-1 mapping dataset."
+    )
+    
+    # Define required positional arguments
+    parser.add_argument(
+        "n", 
+        type=int, 
+        help="Max string length"
+    )
+    parser.add_argument(
+        "raw_charset", 
+        type=str, 
+        help="An integer size for ascii_lowercase slice, or a literal string of characters to use"
+    )
+    parser.add_argument(
+        "num_lines", 
+        type=int, 
+        help="Number of dataset lines to generate"
+    )
+    
+    args = parser.parse_args()
+    
+    n = args.n
+    raw_charset = args.raw_charset
+    num_lines = args.num_lines
     
     # Parse the charset logic
     if raw_charset.isdigit():

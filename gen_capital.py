@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import random
 import string
-import sys
+import argparse
 
 def generate_capital_dataset(n, charset_size, num_lines):
     # Ensure charset size doesn't exceed lowercase alphabet length
@@ -33,21 +33,38 @@ def generate_capital_dataset(n, charset_size, num_lines):
     print(f"Dataset successfully created!")
 
 if __name__ == "__main__":
-    # Check if correct arguments are provided via terminal
-    if len(sys.argv) == 4:
-        try:
-            n = int(sys.argv[1])
-            charset = int(sys.argv[2])
-            num_lines = int(sys.argv[3])
-        except ValueError:
-            print("Error: All arguments must be integers.")
-            print("Usage: python gen_capital.py <n> <charset_size> <num_lines>")
-            sys.exit(1)
-    else:
-        # Fallback default values if run without CLI arguments
-        print("No parameters passed. Using defaults: n=3, charset=26, num_lines=1000")
-        n = 3
-        charset = 26
-        num_lines = 1000
+    parser = argparse.ArgumentParser(
+        description="Generate a capitalization dataset for sequence completion models."
+    )
+    
+    # Define optional positional arguments with defaults using nargs="?"
+    parser.add_argument(
+        "n", 
+        type=int, 
+        nargs="?", 
+        default=3, 
+        help="Max string length (default: 3)"
+    )
+    parser.add_argument(
+        "charset_size", 
+        type=int, 
+        nargs="?", 
+        default=26, 
+        help="Size of the alphabet charset to use (default: 26)"
+    )
+    parser.add_argument(
+        "num_lines", 
+        type=int, 
+        nargs="?", 
+        default=1000, 
+        help="Number of dataset lines to generate (default: 1000)"
+    )
+    
+    args = parser.parse_args()
+    
+    # Check if the user ran the script without passing arguments to mirror original console output
+    import sys
+    if len(sys.argv) < 2:
+        print(f"No parameters passed. Using defaults: n={args.n}, charset={args.charset_size}, num_lines={args.num_lines}")
 
-    generate_capital_dataset(n, charset, num_lines)
+    generate_capital_dataset(args.n, args.charset_size, args.num_lines)
