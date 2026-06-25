@@ -8,20 +8,20 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 
 # --- 1. Configuration & Hyperparameters ---
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = 'cpu'
 batch_size = 32          # Parallel batching capacity
 embedding_dim = 128      # Size of your token vectors
 n_heads = 4              # Attention heads
 n_layers = 4             # Transformer layers
 epochs = 100              # Number of full passes through the data
 lr = 1e-3
-out_dir = 'out_2char'
+out_dir = 'out_1char'
 
 os.makedirs(out_dir, exist_ok=True)
 torch.manual_seed(42)
 
 # --- 2. Load Metadata Vocabulary ---
-data_dir = os.path.join('2-Char/data')
+data_dir = os.path.join('1-Char/data')
 meta_path = os.path.join(data_dir, 'meta.pkl')
 if not os.path.exists(meta_path):
     raise FileNotFoundError("Missing meta.pkl! Run your prepare.py script first.")
