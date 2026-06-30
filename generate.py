@@ -4,6 +4,7 @@ Evaluate the accuracy of a trained sequence completion transformer.
 
 Loads a saved checkpoint from train_completions.py, runs greedy autoregressive
 decoding on each line of an evaluation file, and reports overall accuracy.
+Supports both 1-character and 2-character tokenization transparently.
 
 Usage:
     python generate.py                          # uses defaults
@@ -48,11 +49,14 @@ class Vocabulary:
     pad_id: int = field(init=False)
     equal_id: int = field(init=False)
     eot_id: int = field(init=False)
+    is_2char: bool = field(init=False)  # Automatically flags if 2-char tokenization is active
 
     def __post_init__(self) -> None:
         self.pad_id = self.stoi["_"]
         self.equal_id = self.stoi["="]
         self.eot_id = self.stoi["\n"]
+        # Inferred by checking if any key (excluding \n, =, and _) has length 2
+        self.is_2char = any(len(k) == 2 for k in self.stoi.keys())
 
     @classmethod
     def from_pickle(cls, path: Path) -> "Vocabulary":
@@ -67,6 +71,20 @@ class Vocabulary:
             stoi=meta["stoi"],
             itos=meta["itos"],
         )
+
+    def tokenize_string(self, text: str, is_output: bool = False) -> list[str]:
+        """Converts a raw segment string into explicit tokens based on vocab type."""
+        if not self.is_2char:
+            return list(text)
+
+        # Handle 2-character chunking + padding rules safely
+        if len(text) % 2 != 0:
+            text += "_"
+        
+        tokens = []
+        for i in range(0, len(text), 2):
+            tokens.append(text[i:i+2])
+        return tokens
 
 
 # ---------------------------------------------------------------------------
@@ -153,16 +171,9 @@ def load_model(
     return model, seq_len
 
 
-def _normalise_prompt(raw_prompt: str) -> str:
-    """Ensure the prompt ends with '=' and contains no RHS content."""
-    if "=" in raw_prompt:
-        return raw_prompt.split("=")[0] + "="
-    return raw_prompt + "="
-
-
 @torch.no_grad()
 def complete_sequence(
-    prompt: str,
+    lhs: str,
     model: CompletionTransformer,
     vocab: Vocabulary,
     max_new_tokens: int,
@@ -175,8 +186,10 @@ def complete_sequence(
     Returns only the RHS (right-hand side of '='), stripped of padding and
     newline characters.
     """
-    prompt = _normalise_prompt(prompt)
-    tokens = [vocab.stoi[c] for c in prompt]
+    # Build structural sequence: [LHS tokens] + ['=']
+    lhs_tokens = vocab.tokenize_string(lhs)
+    tokens = [vocab.stoi[tok] for tok in lhs_tokens] + [vocab.equal_id]
+    
     x = torch.tensor(tokens, dtype=torch.long, device=device).unsqueeze(0)
     start_len = x.size(1)
 
@@ -187,11 +200,12 @@ def complete_sequence(
         if next_id == vocab.eot_id:
             break
 
-    chars = [vocab.itos[t.item()] for t in x[0]]
-    if "=" in chars:
-        rhs = chars[chars.index("=") + 1:]
-        return "".join(rhs).replace("\n", "").replace("_", "")
-    return "".join(chars)
+    # Parse predictions past the '=' marker
+    gen_tokens = [vocab.itos[t.item()] for t in x[0]][start_len:]
+    raw_rhs = "".join(gen_tokens)
+    
+    # Clean structural strings away
+    return raw_rhs.replace("\n", "").replace("_", "")
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +231,7 @@ def evaluate(
 
     with eval_file.open(encoding="utf-8") as fh:
         for line_num, raw_line in enumerate(fh, start=1):
-            line = raw_line.strip().replace("_", "")
+            line = raw_line.strip()
             if not line:
                 continue
             if "=" not in line:
@@ -225,22 +239,29 @@ def evaluate(
                 continue
 
             lhs, ground_truth = line.split("=", maxsplit=1)
-            prompt = lhs + "="
+            
+            # Normalise evaluation targets (strip training-time artifact pads if present)
+            lhs_clean = lhs.replace("_", "")
+            gt_clean = ground_truth.replace("_", "")
+
+            # Calculate upper-bound dynamic generation size
+            gt_tokens_len = len(vocab.tokenize_string(gt_clean)) + 1
+
             prediction = complete_sequence(
-                prompt=prompt,
+                lhs=lhs_clean,
                 model=model,
                 vocab=vocab,
-                max_new_tokens=len(ground_truth) + 1,
+                max_new_tokens=max_new_tokens if not vocab.is_2char else gt_tokens_len,
                 max_supported_len=max_supported_len,
                 device=device,
             )
 
-            if prediction == ground_truth:
+            if prediction == gt_clean:
                 correct += 1
             else:
                 print(
-                    f"  [MISS] Prompt: {prompt:<6}  "
-                    f"Expected: {ground_truth:<5}  Got: {prediction:<5}"
+                    f"  [MISS] Prompt: {lhs_clean + '=':<6}  "
+                    f"Expected: {gt_clean:<5}  Got: {prediction:<5}"
                 )
             total += 1
 
@@ -301,7 +322,7 @@ def main() -> None:
         n_layers=4,
         device=device,
     )
-    print(f"Checkpoint loaded  (seq_len={max_supported_len}, device={device})\n")
+    print(f"Checkpoint loaded  (seq_len={max_supported_len}, device={device}, format={'2-char' if vocab.is_2char else '1-char'})\n")
 
     evaluate(
         eval_file=eval_file,

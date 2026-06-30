@@ -104,22 +104,19 @@ def complete_sequence(prompt_str, max_new_tokens=5):
 correct_predictions = 0
 total_predictions = 0
 
-print("Evaluating all pairs from 0+0 to 99+99...")
+print("Evaluating all pairs from 0+0 to 299+299...")
 
-for i in range(0, 100):
-    for j in range(0, 100):
+for i in range(0, 300):
+    for j in range(0, 300):
         # Programmatically construct prompt and the correct math answer
         prompt = f"{i}+{j}="
-        ground_truth = str((i + j) % 100)
+        ground_truth = str((i + j) % 300)
         
         # Request enough generated tokens to fit the answer string length safely
         prediction = complete_sequence(prompt, max_new_tokens=len(ground_truth) + 1)
         
         if prediction == ground_truth:
             correct_predictions += 1
-        else:
-            # Print failures down to the terminal to spot-check where arithmetic breaks
-            print(f"❌ Mismatch | Prompt: {prompt:<7} Expected: {ground_truth:<4} Got: {prediction:<4}")
             
         total_predictions += 1
 

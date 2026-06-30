@@ -14,6 +14,9 @@ import pickle
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+import sys
+import time
+import csv
 
 import numpy as np
 import torch
@@ -89,10 +92,6 @@ class Vocabulary:
 class SequenceDataset(Dataset):
     """
     Loads tokenised completion sequences from a binary file of uint16 token IDs.
-
-    Each line has the form:  [pad] [input chars] [=] [output chars] [\n]
-    The model is trained with a causal LM objective, but loss is only computed
-    on the output portion (tokens after and including the '=' position).
     """
 
     def __init__(self, bin_path: Path, vocab: Vocabulary) -> None:
@@ -101,15 +100,10 @@ class SequenceDataset(Dataset):
         self.max_len = max(len(s) for s in self.sequences)
         self.vocab = vocab
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _split_into_lines(
         tokens: np.ndarray, eot_id: int
     ) -> list[torch.Tensor]:
-        """Split a flat token array into per-line tensors (inclusive of \n)."""
         eot_indices = np.where(tokens == eot_id)[0]
         sequences: list[torch.Tensor] = []
         start = 0
@@ -121,22 +115,12 @@ class SequenceDataset(Dataset):
     def _build_targets(
         self, seq: torch.Tensor, x: torch.Tensor
     ) -> torch.Tensor:
-        """
-        Build the target tensor for one sequence.
-
-        Tokens before (and not including) '=' are masked with -100 so the
-        loss function ignores them.  Tokens from '=' onward are the shifted
-        ground-truth labels.
-        """
         y = torch.full_like(x, fill_value=-100)
         shifted = seq[1:].clone()
 
         eq_positions = (x == self.vocab.equal_id).nonzero(as_tuple=True)[0]
         if len(eq_positions) == 0:
-            raise ValueError(
-                "Sequence is missing the '=' delimiter. "
-                "Check your data preparation step."
-            )
+            raise ValueError("Sequence is missing the '=' delimiter.")
 
         eq_pos = eq_positions[0].item()
         y[eq_pos:] = shifted[eq_pos:]
@@ -145,25 +129,20 @@ class SequenceDataset(Dataset):
     def _pad_to_length(
         self, tensor: torch.Tensor, target_len: int, pad_value: int
     ) -> torch.Tensor:
-        """Right-pad a 1-D tensor to `target_len` with `pad_value`."""
         shortfall = target_len - len(tensor)
         if shortfall <= 0:
             return tensor
         padding = torch.full((shortfall,), pad_value, dtype=torch.long)
         return torch.cat([tensor, padding])
 
-    # ------------------------------------------------------------------
-    # Dataset protocol
-    # ------------------------------------------------------------------
-
     def __len__(self) -> int:
         return len(self.sequences)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         seq = self.sequences[idx]
-        target_len = self.max_len - 1   # max input length after dropping last token
+        target_len = self.max_len - 1   
 
-        x = seq[:-1].clone()            # input: drop the trailing \n
+        x = seq[:-1].clone()            
         y = self._build_targets(seq, x)
 
         x = self._pad_to_length(x, target_len, self.vocab.pad_id)
@@ -179,9 +158,6 @@ class SequenceDataset(Dataset):
 class CompletionTransformer(nn.Module):
     """
     Decoder-only transformer (GPT-style) for character-level sequence completion.
-
-    Uses a causal attention mask so each position can only attend to earlier
-    positions, preventing the model from "seeing" the answer during training.
     """
 
     def __init__(
@@ -238,7 +214,6 @@ def run_epoch(
     epoch: int,
     total_epochs: int,
 ) -> float:
-    """Run one full pass (train or eval) and return the mean loss."""
     is_train = optimizer is not None
     model.train(is_train)
 
@@ -275,9 +250,11 @@ def run_epoch(
 
 def parse_args() -> TrainConfig:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("config_file", type=str, nargs="?", default=None,
+                        help="Optional path to a nanoGPT-style python config file")
     parser.add_argument("--data-dir", type=Path, default=Path("1-Char/data"))
     parser.add_argument("--out-dir", type=Path, default=Path("out_1char"))
-    parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--embedding-dim", type=int, default=128)
     parser.add_argument("--n-heads", type=int, default=4)
     parser.add_argument("--n-layers", type=int, default=4)
@@ -287,20 +264,42 @@ def parse_args() -> TrainConfig:
     args = parser.parse_args()
 
     cfg = TrainConfig()
-    cfg.data_dir = args.data_dir
-    cfg.out_dir = args.out_dir
-    cfg.device = args.device
-    cfg.embedding_dim = args.embedding_dim
-    cfg.n_heads = args.n_heads
-    cfg.n_layers = args.n_layers
-    cfg.batch_size = args.batch_size
-    cfg.epochs = args.epochs
-    cfg.lr = args.lr
+    
+    if args.config_file and args.config_file.endswith('.py'):
+        print(f"Overriding config using nanoGPT-style file: {args.config_file}")
+        with open(args.config_file, "r") as f:
+            config_code = f.read()
+        
+        local_namespace = {}
+        exec(config_code, {}, local_namespace)
+        
+        for key, value in local_namespace.items():
+            if hasattr(cfg, key):
+                setattr(cfg, key, value)
+                
+        if isinstance(cfg.data_dir, str):
+            cfg.data_dir = Path(cfg.data_dir)
+        if isinstance(cfg.out_dir, str):
+            cfg.out_dir = Path(cfg.out_dir)
+    
+    if "--data-dir" in sys.argv: cfg.data_dir = args.data_dir
+    if "--out-dir" in sys.argv: cfg.out_dir = args.out_dir
+    if "--device" in sys.argv: cfg.device = args.device
+    if "--embedding-dim" in sys.argv: cfg.embedding_dim = args.embedding_dim
+    if "--n-heads" in sys.argv: cfg.n_heads = args.n_heads
+    if "--n-layers" in sys.argv: cfg.n_layers = args.n_layers
+    if "--batch-size" in sys.argv: cfg.batch_size = args.batch_size
+    if "--epochs" in sys.argv: cfg.epochs = args.epochs
+    if "--lr" in sys.argv: cfg.lr = args.lr
+        
     return cfg
 
 
 def main() -> None:
     cfg = parse_args()
+    
+    # Track total runtime
+    total_start_time = time.perf_counter()
 
     cfg.out_dir.mkdir(parents=True, exist_ok=True)
     torch.manual_seed(cfg.seed)
@@ -332,6 +331,10 @@ def main() -> None:
         n_layers=cfg.n_layers,
     ).to(cfg.device)
 
+    # Calculate exact parameter count
+    param_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Trainable Model Parameters: {param_count:,}")
+
     optimizer = optim.AdamW(
         model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay
     )
@@ -339,43 +342,89 @@ def main() -> None:
 
     print(f"Training on device: {cfg.device}")
 
+    # Metrics collections for charting
+    history_epochs = []
+    history_train_loss = []
+    history_val_loss = []
+
+    # CSV setup
+    csv_path = cfg.out_dir / "metrics.csv"
+    csv_file = open(csv_path, mode="w", newline="", encoding="utf-8")
+    csv_writer = csv.writer(csv_file)
+    csv_writer.writerow(["Epoch", "Train Loss", "Val Loss", "Training Time (sec)", "Param Count"])
+
     # --- Training loop ---
     for epoch in range(1, cfg.epochs + 1):
+        start_time = time.perf_counter()
+        
         train_loss = run_epoch(
-            model=model,
-            loader=train_loader,
-            vocab_size=vocab.vocab_size,
-            criterion=criterion,
-            optimizer=optimizer,
-            grad_clip=cfg.grad_clip,
-            device=cfg.device,
-            log_interval=cfg.log_interval,
-            epoch=epoch,
-            total_epochs=cfg.epochs,
+            model=model, loader=train_loader, vocab_size=vocab.vocab_size,
+            criterion=criterion, optimizer=optimizer, grad_clip=cfg.grad_clip,
+            device=cfg.device, log_interval=cfg.log_interval, epoch=epoch, total_epochs=cfg.epochs,
         )
+        
+        epoch_time = time.perf_counter() - start_time
+        
         val_loss = run_epoch(
-            model=model,
-            loader=val_loader,
-            vocab_size=vocab.vocab_size,
-            criterion=criterion,
-            optimizer=None,         # signals eval mode
-            grad_clip=cfg.grad_clip,
-            device=cfg.device,
-            log_interval=cfg.log_interval,
-            epoch=epoch,
-            total_epochs=cfg.epochs,
+            model=model, loader=val_loader, vocab_size=vocab.vocab_size,
+            criterion=criterion, optimizer=None, grad_clip=cfg.grad_clip,
+            device=cfg.device, log_interval=cfg.log_interval, epoch=epoch, total_epochs=cfg.epochs,
         )
 
+        # Track history data for every epoch to ensure smooth curves
+        history_epochs.append(epoch)
+        history_train_loss.append(train_loss)
+        history_val_loss.append(val_loss)
+
         print(f"\n{'=' * 60}")
-        print(f"EPOCH {epoch} SUMMARY")
+        print(f"EPOCH {epoch} SUMMARY | Time: {epoch_time:.2f}s")
         print(f"  Train loss : {train_loss:.4f}")
         print(f"  Val loss   : {val_loss:.4f}")
         print(f"{'=' * 60}\n")
+
+        # Write data row ONLY on 10-epoch intervals (or the absolute last epoch)
+        if epoch % 10 == 0 or epoch == cfg.epochs:
+            csv_writer.writerow([epoch, f"{train_loss:.4f}", f"{val_loss:.4f}", f"{epoch_time:.2f}", param_count])
+            csv_file.flush() # force write to disk safely
+
+    csv_file.close()
+    print(f"Metrics table log updated successfully at: {csv_path}")
+
+    # --- Generate Loss Curve Plot ---
+    try:
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(10, 6))
+        plt.plot(history_epochs, history_train_loss, label="Train Loss", color="blue", linewidth=2)
+        plt.plot(history_epochs, history_val_loss, label="Val Loss", color="orange", linewidth=2)
+        plt.title("Loss Over Epochs", fontsize=14, fontweight="bold")
+        plt.xlabel("Epochs", fontsize=12)
+        plt.ylabel("Cross Entropy Loss", fontsize=12)
+        plt.grid(True, linestyle="--", alpha=0.6)
+        plt.legend(fontsize=12)
+        
+        plot_path = cfg.out_dir / "loss_chart.png"
+        plt.savefig(plot_path, dpi=150)
+        plt.close()
+        print(f"Loss plot chart saved successfully at: {plot_path}")
+    except ImportError:
+        print("Warning: matplotlib not installed. Skipping plot layout creation.")
 
     # --- Persist weights ---
     weights_path = cfg.out_dir / "completion_model.pth"
     torch.save(model.state_dict(), weights_path)
     print(f"Weights saved to {weights_path}")
+
+    # --- Final Statistics ---
+    total_runtime = time.perf_counter() - total_start_time
+    final_train_loss = history_train_loss[-1]
+    final_val_loss = history_val_loss[-1]
+    
+    print(f"\n{'=' * 60}")
+    print(f"TRAINING COMPLETE")
+    print(f"  Total Runtime    : {total_runtime:.2f} seconds")
+    print(f"  Final Train Loss : {final_train_loss:.4f}")
+    print(f"  Final Val Loss   : {final_val_loss:.4f}")
+    print(f"{'=' * 60}\n")
 
 
 if __name__ == "__main__":

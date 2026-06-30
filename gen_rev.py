@@ -18,7 +18,7 @@ def generate_reverse_dataset(n, charset_size, num_lines):
     with open(output_filename, "w", encoding="utf-8") as f:
         for _ in range(num_lines):
             # Pick a random length for the input string between 1 and n
-            line_len = random.randint(1, n)
+            line_len = 2 * random.randint(1, n) # For 2-character tokens, we want even lengths, so multiply by 2
             
             # Generate random characters from our specific charset slice
             input_chars = [random.choice(available_chars) for _ in range(line_len)]

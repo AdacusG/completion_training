@@ -24,7 +24,7 @@ Note: This partitions your data into a 90% training split and 10% validation spl
 Now that the tokens are prepped, you can kick off the training routine. Run:
 ```
 cd ..
-python train_completions.py
+python train_completions.py config/config_1char.py
 ```
 By default, the model will run for 100 epochs (complete passes through the data) to learn the underlying sequence pattern.
 - Train Loss: Represents how well the model is fitting the data it is actively studying.
@@ -43,7 +43,7 @@ Because a complete $100 \times 100$ addition table contains 10,000 total permuta
 Your Task: Note that `gen_add.py` takes arguments `V` and `N`, where `V` is the modulo and `N` is the number of lines generated. Using this, create and run a command to generate the `inputadd.txt` based on the data presented earlier.
 ### 2. Prepare and Train the Data
 Now, prepare your newly generated inputadd.txt file for training and kick off the training routine just like you did in the first experiment.
-Pro-Tip: Mathematical patterns take longer to learn than simple memorization. Before running the training script, open train_completions.py in your text editor, locate the epochs variable on line 16, and increase it (e.g., set epochs = 200 or higher) to give the network enough time to discover the underlying arithmetic logic.
+Pro-Tip: Mathematical patterns take longer to learn than simple memorization. Before running the training script, open config_1char.py and locate the epochs variable, and increase it (e.g., set epochs = 200 or higher) to give the network enough time to discover the underlying arithmetic logic.
 ### 3. Exhaustive Evaluation
 While you can test accuracy using generate.py on your input file, we want to see if the model actually understands addition globally. We can test its conceptual understanding by sweeping every single possible combination from $0+0$ to $99+99$. To do this, input the following command into console:
 ```
